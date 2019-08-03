@@ -4,20 +4,17 @@ var aprs = require('aprs-parser');
 var config = require('../config.js'); //Putting config up out of the checked in directory to keep passwords out of git
 var mysql = require('mysql');
 
+var pool  = mysql.createPool({
+  connectionLimit : 10,
+  host            : config.sqlHost,
+  user            : config.sqlUser,
+  password        : config.sqlPass,
+  database        : 'aprslogger'
+});
+
 var firstRun = true;
 var parser = new aprs.APRSParser();
 
-var db = mysql.createConnection({
-	host: config.sqlHost,
-	user: config.sqlUser,
-	password: config.sqlPass,
-	database: "aprslogger"
-});
-
-db.connect(function(err) {
-  if (err) throw err;
-  console.log("MySQL Server Connected: " + config.sqlHost);
-});
 
 var client = new net.Socket();
 client.connect({
@@ -56,13 +53,25 @@ client.on('data', function(data){
 			+ parsedMessage.data.extension.courseDeg + ", " + parsedMessage.data.extension.speedMPerS + ", '" + Buffer.from(parsedMessage.raw).toString('base64') + "', " + parsedMessage.data.telemetrySequence + ", " + parsedMessage.data.telemetryValues[0] + ", " + parsedMessage.data.telemetryValues[1] + ")";
 			//Base64 Encoding the raw packet because weird characters. Reverse with Buffer.from(message, 'base64').toString('ascii')
 
-		db.query(query, (err, result) => {
-            if (err)
-            {
-            	console.log("SQL Error " + err.code + ": " + query);
-            }
-            console.log("Message logged from "+ parsedMessage.from.call + "-" + parsedMessage.from.ssid);
-        });
+
+		pool.getConnection(function(err, connection) {
+  			if (err) throw err; // not connected!
+
+  			// Use the connection
+  			connection.query(query, function (error, results, fields) {
+    			// When done with the connection, release it.
+    			connection.release();
+    			console.log("Message logged from "+ parsedMessage.from.call + "-" + parsedMessage.from.ssid);
+
+    			// Handle error after the release.
+    			if (error)
+    			{
+    				console.log("SQL Error " + err.code + ": " + query);
+    			}
+
+  			});
+		});
+
 	}
 	//The first response from the server will be the server version. We need to send the login string to enable filter
 	if (firstRun)
